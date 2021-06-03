@@ -29,7 +29,8 @@ import warnings
 from logging import StreamHandler
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
-
+from rational.torch import Rational
+import pickle
 
 # Integrations must be imported before ML frameworks:
 from .integrations import (  # isort: split
@@ -253,9 +254,9 @@ class Trainer:
         model_init: Callable[[], PreTrainedModel] = None,
         compute_metrics: Optional[Callable[[EvalPrediction], Dict]] = None,
         callbacks: Optional[List[TrainerCallback]] = None,
-        do_save_full_model: Optional[bool] = None,
-        do_save_adapters: Optional[bool] = None,
-        do_save_adapter_fusion: Optional[bool] = None,
+        do_save_full_model: bool = True,
+        do_save_adapters: bool = False,
+        do_save_adapter_fusion: bool = False,
         adapter_names: Optional[List[List[str]]] = None,
         optimizers: Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR] = (None, None),
     ):
@@ -265,10 +266,15 @@ class Trainer:
             args = TrainingArguments(output_dir=output_dir)
         self.args = args
         # Seed must be set before instantiating the model when using model
-        set_seed(self.args.seed)
+        set_seed(42) #self.args.seed
         self.hp_name = None
         self.deepspeed = None
         self.is_in_train = False
+
+        self.rationals = [x for x in model.modules() if type(x) ==  Rational]
+        self.show_step = 0
+        self.plots = []
+        np.set_printoptions(suppress=True)
 
         # memory metrics - must set up as early as possible
         self._memory_tracker = TrainerMemoryTracker(self.args.skip_memory_metrics)
@@ -374,30 +380,12 @@ class Trainer:
         # Create output directory if needed
         if self.is_world_process_zero():
             os.makedirs(self.args.output_dir, exist_ok=True)
-
+        # adapters used
+        self.do_save_full_model = do_save_full_model
+        self.do_save_adapters = do_save_adapters
+        self.do_save_adapter_fusion = do_save_adapter_fusion
         if adapter_names is not None:
             self.model.set_active_adapters(adapter_names)
-        # Set the defaults for loading/ saving model & adapters
-        if isinstance(self.model, PreTrainedModel):
-            model_freezed = getattr(self.model.base_model, "model_freezed", False)
-        else:
-            model_freezed = False
-        if model_freezed and self.model.active_adapters:
-            self.do_save_full_model = False
-            self.do_save_adapters = True
-            self.do_save_adapter_fusion = True
-        else:
-            self.do_save_full_model = True
-            self.do_save_adapters = False
-            self.do_save_adapter_fusion = False
-        # override with explicit setting
-        if do_save_full_model is not None:
-            self.do_save_full_model = do_save_full_model
-        if do_save_adapters is not None:
-            self.do_save_adapters = do_save_adapters
-        if do_save_adapter_fusion is not None:
-            self.do_save_adapter_fusion = do_save_adapter_fusion
-
         if not callable(self.data_collator) and callable(getattr(self.data_collator, "collate_batch", None)):
             raise ValueError("The `data_collator` should be a simple callable (function, class with `__call__`).")
 
@@ -933,7 +921,7 @@ class Trainer:
         model_reloaded = False
         if self.model_init is not None:
             # Seed must be set before instantiating the model when using model_init.
-            set_seed(self.args.seed)
+            set_seed(42) #self.args.seed
             self.model = self.call_model_init(trial)
             model_reloaded = True
             # Reinitializes optimizer and scheduler
@@ -1117,6 +1105,13 @@ class Trainer:
                     break
 
         for epoch in range(epochs_trained, num_train_epochs):
+
+            print('epoch', epoch)
+            
+            #for i in range(len(self.rationals)):
+             #   self.rationals[i].input_retrieve_mode()
+            
+
             if isinstance(train_dataloader, DataLoader) and isinstance(train_dataloader.sampler, DistributedSampler):
                 train_dataloader.sampler.set_epoch(epoch)
 
@@ -1225,6 +1220,14 @@ class Trainer:
 
             self.control = self.callback_handler.on_epoch_end(self.args, self.state, self.control)
             self._maybe_log_save_evaluate(tr_loss, model, trial, epoch)
+             
+            for i in range(len(self.rationals)):
+                #if self.rationals[i] is (not None):
+                    #self.rationals[i].training_mode()
+                self.plots.append(self.rationals[i].show(display=False)) #step=self.show_step*100+i, 
+
+            self.show_step += 1
+            
 
             if self.args.tpu_metrics_debug or self.args.debug:
                 if is_torch_tpu_available():
@@ -1258,14 +1261,7 @@ class Trainer:
                     f"Loading best model from {self.state.best_model_checkpoint} (score: {self.state.best_metric})."
                 )
                 if isinstance(model, PreTrainedModel):
-                    # cache adapter setup for later reset
-                    if hasattr(self.model, "active_adapters"):
-                        adapter_setup = self.model.active_adapters
-                    else:
-                        adapter_setup = None
                     self.model = model.from_pretrained(self.state.best_model_checkpoint)
-                    if adapter_setup is not None:
-                        self.model.set_active_adapters(adapter_setup)
                 else:
                     state_dict = torch.load(os.path.join(self.state.best_model_checkpoint, WEIGHTS_NAME))
                     self.model.load_state_dict(state_dict)
@@ -1283,8 +1279,7 @@ class Trainer:
                     f"Loading best adapter fusion(s) from {self.state.best_model_checkpoint} (score: {self.state.best_metric})."
                 )
                 # attempt to re-load all adapter fusions from checkpoint
-                fusion_models = getattr(self.model.config, "adapter_fusion_models", [])
-                for fusion in fusion_models:
+                for fusion in self.model.config.adapter_fusion_models:
                     fusion_dir = os.path.join(self.state.best_model_checkpoint, fusion)
                     if os.path.exists(fusion_dir):
                         self.model.load_adapter_fusion(fusion_dir)
@@ -1321,6 +1316,11 @@ class Trainer:
         self.is_in_train = False
 
         self._memory_tracker.stop_and_update_metrics(metrics)
+
+        
+        with open('rte_sigmoid.p', 'wb') as fp:
+            pickle.dump(self.plots, fp, protocol=pickle.HIGHEST_PROTOCOL)
+        
 
         return TrainOutput(self.state.global_step, self._total_loss_scalar / self.state.global_step, metrics)
 

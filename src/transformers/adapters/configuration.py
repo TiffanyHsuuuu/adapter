@@ -134,7 +134,7 @@ class PfeifferConfig(AdapterConfig):
     ln_after: bool = False
     mh_adapter: bool = False
     output_adapter: bool = True
-    non_linearity: str = "relu"
+    non_linearity: str = "rational" #"relu"
     reduction_factor: Union[int, Mapping] = 16
 
 
