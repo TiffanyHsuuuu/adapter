@@ -67,12 +67,12 @@ class Adapter(nn.Module):
 
         # list for all modules of the adapter, passed into nn.Sequential()
         seq_list = []
-
+        """
         # If we want to have a layer norm on input, we add it to seq_list
         if self.add_layer_norm_before:
             self.adapter_norm_before = nn.LayerNorm(self.input_size)
             seq_list.append(self.adapter_norm_before)
-
+        
         # if a downsample size is not passed, we just half the size of the original input
         self.down_sample = down_sample
         if down_sample is None:
@@ -80,12 +80,12 @@ class Adapter(nn.Module):
 
         # Linear down projection of the input
         seq_list.append(nn.Linear(self.input_size, self.down_sample))
-
+        """
         # select non-linearity
         #self.non_linearity = Activation_Function_Class(non_linearity.lower())
         if non_linearity=='rational':
            self.non_linearity = Rational(cuda=True, trainable=True, train_numerator=True,
-                 train_denominator=True, version="A", approx_func="linear") #True , trainable=True relu
+                 train_denominator=True, version="A", approx_func="sigmoid") #True , trainable=True relu
         else:
             self.non_linearity = Activation_Function_Class(non_linearity.lower())
 
@@ -95,9 +95,8 @@ class Adapter(nn.Module):
         # residual connection
         self.adapter_down = nn.Sequential(*seq_list)
 
-        # Up projection to input size
-        self.adapter_up = nn.Linear(self.down_sample, self.input_size)
-
+        # Up projection to input size self.adapter_up = nn.identity() #nn.Linear(self.down_sample, self.input_size)
+        """
         # If we want to have a layer norm on output, we apply it later after a separate residual connection
         # This means that we learn a new output layer norm, which replaces another layer norm learned in the bert layer
         if self.add_layer_norm_after:
@@ -107,11 +106,11 @@ class Adapter(nn.Module):
         if init_bert_weights:
             self.adapter_down.apply(self.init_bert_weights)
             self.adapter_up.apply(self.init_bert_weights)
-
+        """
     def forward(self, x, residual_input):  # , residual_input=None):
         down = self.adapter_down(x)
 
-        up = self.adapter_up(down)
+        up = down #self.adapter_up(down)
 
         output = up
 

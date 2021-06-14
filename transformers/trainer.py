@@ -1106,10 +1106,11 @@ class Trainer:
 
         for epoch in range(epochs_trained, num_train_epochs):
 
-            print('epoch', epoch)
-            
+            #print('retrieve_input: epoch', epoch)
+            #Rational.save_all_inputs(True)
+
             #for i in range(len(self.rationals)):
-             #   self.rationals[i].input_retrieve_mode()
+               #self.rationals[i].input_retrieve_mode()
             
 
             if isinstance(train_dataloader, DataLoader) and isinstance(train_dataloader.sampler, DistributedSampler):
@@ -1135,6 +1136,9 @@ class Trainer:
             self.control = self.callback_handler.on_epoch_begin(self.args, self.state, self.control)
 
             for step, inputs in enumerate(epoch_iterator):
+                
+                #print('retrieve_input: epoch', epoch)
+                Rational.save_all_inputs(True)
 
                 # Skip past any already trained steps if resuming training
                 if steps_trained_in_current_epoch > 0:
@@ -1218,15 +1222,20 @@ class Trainer:
                 if self.control.should_epoch_stop or self.control.should_training_stop:
                     break
 
+                #print('stop_retrieve: epoch', epoch)
+                Rational.capture_all(f"Epoch {epoch}")
+                Rational.save_all_inputs(False)
+            Rational.export_evolution_graphs()
+
             self.control = self.callback_handler.on_epoch_end(self.args, self.state, self.control)
             self._maybe_log_save_evaluate(tr_loss, model, trial, epoch)
-             
-            for i in range(len(self.rationals)):
+            
+            #for i in range(len(self.rationals)):
                 #if self.rationals[i] is (not None):
                     #self.rationals[i].training_mode()
-                self.plots.append(self.rationals[i].show(display=False)) #step=self.show_step*100+i, 
+                #self.plots.append(self.rationals[i].show(display=False)) #step=self.show_step*100+i, 
 
-            self.show_step += 1
+            #self.show_step += 1
             
 
             if self.args.tpu_metrics_debug or self.args.debug:
@@ -1318,8 +1327,10 @@ class Trainer:
         self._memory_tracker.stop_and_update_metrics(metrics)
 
         
-        with open('rte_sigmoid.p', 'wb') as fp:
-            pickle.dump(self.plots, fp, protocol=pickle.HIGHEST_PROTOCOL)
+        
+
+        #with open('boolq_relu.p', 'wb') as fp:
+            #pickle.dump(self.plots, fp, protocol=pickle.HIGHEST_PROTOCOL)
         
 
         return TrainOutput(self.state.global_step, self._total_loss_scalar / self.state.global_step, metrics)
